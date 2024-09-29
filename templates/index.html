@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KMeans Clustering</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="{{ url_for('static', filename='custom.js') }}"></script>
+</head>
+<body>
+    <h1>KMeans Clustering Visualization</h1>
+
+    <label for="init_method">Initialization Method:</label>
+    <select id="init_method">
+        <option value="random">Random</option>
+        <option value="farthest_first">Farthest First</option>
+        <option value="kmeans++">KMeans++</option>
+        <option value="manual">Manual</option>
+    </select>
+
+    <button onclick="generateData()">Generate Data</button>
+    <button onclick="initialize()">Initialize Centroids</button>
+    <button onclick="step()">Step Through</button>
+    <button onclick="runToCompletion()">Run to Completion</button>
+    <button onclick="reset()">Reset</button>
+
+    <div id="plot"></div>
+
+    <script>
+        let dataPoints = [];
+        let centroids = [];
+
+        function drawPlot() {
+            const trace1 = {
+                x: dataPoints.map(point => point[0]),
+                y: dataPoints.map(point => point[1]),
+                mode: 'markers',
+                type: 'scatter',
+                marker: { size: 10 }
+            };
+
+            const layout = {
+                title: 'KMeans Clustering',
+                clickmode: 'event+select'
+            };
+
+            Plotly.newPlot('plot', [trace1], layout);
+
+            // Click event listener for selecting points
+            const plotDiv = document.getElementById('plot');
+            plotDiv.on('plotly_click', function(data) {
+                const point = data.points[0];
+                const selectedPoint = [point.x, point.y];
+
+                // Only process manual selection if the selected method is manual
+                if (document.getElementById('init_method').value === 'manual') {
+                    $.ajax({
+                        url: '/manual_select',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ points: [selectedPoint] }),
+                        success: function(response) {
+                            console.log(response);
+                        }
+                    });
+                } else {
+                    alert("Switch to 'Manual' initialization method to select centroids.");
+                }
+            });
+        }
+
+        function generateData() {
+            $.post('/generate_data', function(data) {
+                dataPoints = data;
+                drawPlot();
+            });
+        }
+
+        function initialize() {
+            const method = document.getElementById('init_method').value;
+            $.ajax({
+                url: '/initialize',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ method: method }),
+                success: function(response) {
+                    centroids = response;
+                    console.log("Centroids initialized:", centroids);
+                }
+            });
+        }
+
+        function step() {
+            $.post('/step', function(data) {
+                dataPoints = data.data_points;
+                centroids = data.centroids;
+                drawPlot();
+                console.log("Step completed:", centroids);
+            });
+        }
+
+        function runToCompletion() {
+            $.post('/run_to_completion', function(data) {
+                dataPoints = data.data_points;
+                centroids = data.centroids;
+                drawPlot();
+                console.log("Run to completion:", centroids);
+            });
+        }
+
+        function reset() {
+            dataPoints = [];
+            centroids = [];
+            Plotly.purge('plot');
+        }
+    </script>
+</body>
+</html>
