@@ -1,14 +1,19 @@
-from flask import Flask, render_template, jsonify, request
-import numpy as np
-from kmeans import KMeans 
-import plotly.graph_objects as go
+from flask import Flask, jsonify, request, render_template
+import random
+from kmeans import KMeans  # Import the KMeans class
 
 app = Flask(__name__)
 
-# Store dataset and centroids globally
-data_points = None
-centroids = None
-kmeans = None
+# KMeans state storage
+kmeans_state = {
+    'data': [],
+    'kmeans': None,  # Store KMeans instance here
+    'iteration': 0
+}
+
+# Function to generate random 2D data points
+def generate_random_data(num_points=100, x_range=(0, 10), y_range=(0, 10)):
+    return [[random.uniform(x_range[0], x_range[1]), random.uniform(y_range[0], y_range[1])] for _ in range(num_points)]
 
 @app.route('/')
 def index():
@@ -16,50 +21,72 @@ def index():
 
 @app.route('/generate_data', methods=['POST'])
 def generate_data():
-    global data_points
-    num_points = 100
-    data_points = np.random.rand(num_points, 2) * 10
-    return jsonify(data_points.tolist())
+    data = generate_random_data()
+    kmeans_state['data'] = data
+    return jsonify(data)
 
-@app.route('/initialize', methods=['POST'])
-def initialize():
-    global centroids, kmeans
-    init_method = request.json.get('method')
-    kmeans = KMeans(n_clusters=3, init_method=init_method)
-    centroids = kmeans.initialize_centroids(data_points)
-    return jsonify(centroids.tolist())
+@app.route('/initialize_kmeans', methods=['POST'])
+def initialize_kmeans():
+    global kmeans_state
+    data = request.json['data']
+    k = request.json['k']
+    initialization_method = request.json['initialization']
 
-@app.route('/step', methods=['POST'])
-def step():
-    global data_points, centroids, kmeans
-    kmeans.step()
-    centroids = kmeans.centroids
+    if initialization_method == 'random':
+        initial_centroids = random.sample(data, k)
+    elif initialization_method == 'farthest':
+        initial_centroids = [random.choice(data)]
+        for _ in range(1, k):
+            farthest_point = max(data, key=lambda point: min(KMeans.euclidean_distance(point, c) for c in initial_centroids))
+            initial_centroids.append(farthest_point)
+    elif initialization_method == 'kmeans++':
+        initial_centroids = [random.choice(data)]
+        for _ in range(1, k):
+            distances = [min(KMeans.euclidean_distance(point, c) for c in initial_centroids) for point in data]
+            weighted_probabilities = [d / sum(distances) for d in distances]
+            next_centroid = random.choices(data, weights=weighted_probabilities)[0]
+            initial_centroids.append(next_centroid)
+    elif initialization_method == 'manual':
+        initial_centroids = request.json['initial_centroids']
+
+    kmeans_state['kmeans'] = KMeans(k)
+    kmeans_state['kmeans'].centroids = initial_centroids
+    kmeans_state['data'] = data
+    kmeans_state['iteration'] = 0
+    
     return jsonify({
-        'data_points': data_points.tolist(),
-        'centroids': centroids.tolist(),
-        'assignments': kmeans.assignments.tolist()
+        'centroids': kmeans_state['kmeans'].centroids,
+        'clusters': kmeans_state['kmeans'].clusters
     })
 
-@app.route('/run_to_completion', methods=['POST'])
-def run_to_completion():
-    global centroids, kmeans
-    kmeans.run_to_completion()
-    centroids = kmeans.centroids
+@app.route('/step_kmeans', methods=['POST'])
+def step_kmeans():
+    global kmeans_state
+    kmeans = kmeans_state['kmeans']
+    data = kmeans_state['data']
+    
+    kmeans.kmeans_single_step(data)
+    
+    kmeans_state['iteration'] += 1
+    
     return jsonify({
-        'data_points': data_points.tolist(),
-        'centroids': centroids.tolist(),
-        'assignments': kmeans.assignments.tolist()
+        'centroids': kmeans.centroids,
+        'clusters': kmeans.clusters
     })
 
-@app.route('/manual_select', methods=['POST'])
-def manual_select():
-    global centroids
-    selected_points = request.json.get('points')
+@app.route('/run_kmeans_final', methods=['POST'])
+def run_kmeans_final():
+    global kmeans_state
+    data = kmeans_state['data']
+    kmeans = kmeans_state['kmeans']
     
-    # Update centroids based on user-selected points
-    centroids = np.array(selected_points)
+    centroids, clusters = kmeans.run(data)
+    kmeans_state['iteration'] = kmeans_state['iteration'] + kmeans.max_iterations  # Update iterations count
     
-    return jsonify({'message': 'Centroids updated successfully', 'new_centroids': centroids.tolist()})
+    return jsonify({
+        'centroids': centroids,
+        'clusters': clusters
+    })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3000)
+    app.run(debug=True, host='localhost', port=3000)
